@@ -1,0 +1,29 @@
+# Environment & Secrets
+.env
+*.env
+*.pem
+*.key
+
+# Python Virtual Environments
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+
+# IDEs & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Data & Output Artifacts (Ignored to keep repo size light)
+/data/raw/*
+!/data/raw/.gitkeep
+/data/processed/*
+!/data/processed/.gitkeep
+/output/*
+!/output/.gitkeep
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/

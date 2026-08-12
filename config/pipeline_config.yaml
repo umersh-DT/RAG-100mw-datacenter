@@ -1,0 +1,65 @@
+project:
+  name: "100MW Data Center RAG Pilot"
+  version: "1.0.0"
+  entity_name: "HyperScale Infrastructure LLC"
+
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  evaluation_dir: "data/evaluation"
+  commercial_legal_dir: "data/raw/01_commercial_legal"
+  financial_regulatory_dir: "data/raw/02_financial_regulatory"
+  communications_dir: "data/raw/03_communications"
+  engineering_drawings_dir: "data/raw/04_engineering_drawings"
+
+metadata_taxonomy:
+  document_types:
+    - "Power Purchase Agreement"
+    - "Interconnection Agreement"
+    - "Client Colocation SLA"
+    - "TOU Power Invoice"
+    - "Tax Exemption Certificate"
+    - "Customs Regulatory Brief"
+    - "Single Line Diagram"
+    - "HVAC P&ID Schematic"
+    - "Civil Foundation Drawing"
+  departments:
+    - "Legal & Compliance"
+    - "Financial Operations"
+    - "Electrical Infrastructure"
+    - "Mechanical & Cooling"
+    - "Civil & Structural"
+    - "Executive Office"
+
+generation_target:
+  commercial_legal_count: 5
+  financial_regulatory_count: 5
+  communications_count: 5
+  engineering_drawings_count: 5
+
+chunking:
+  chunk_size: 500
+  chunk_overlap: 50
+  table_preserve_mode: "markdown" # Converts tables to Markdown strings inside chunks
+
+ingestion:
+  processed_chunks_file: "data/processed/chunks.json"
+  
+indexing:
+  vector_db_dir: "output/chroma_db"
+  bm25_index_file: "output/bm25_index.pkl"
+  embedding_model: "all-MiniLM-L6-v2" # Lightweight, high-speed local embedding model
+
+retrieval:
+  top_k_vector: 5
+  top_k_bm25: 5
+  top_k_final: 3
+  reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+generation:
+  model_name: "gpt-4o-mini" # Or local LLM / Gemini endpoint
+  temperature: 0.0 # Standard zero-temperature for deterministic facts
+  system_prompt: |
+    You are an enterprise AI data center engineer. Answer the user's question using strictly the provided context chunks.
+    If the context does not contain enough information to answer, state clearly that you do not know. Do not hallucinate.
+    You MUST include inline bracketed citations referencing the source file and page for every factual claim made (e.g., [Document.pdf, Page X]).

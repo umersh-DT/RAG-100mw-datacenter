@@ -1,3 +1,8 @@
+# Import sys and Path to ensure root project imports function cleanly
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
 # Import os module for system path manipulation
 import os
 # Import json module to display retrieved results neatly
@@ -6,8 +11,6 @@ import json
 import pickle
 # Import yaml module to read central pipeline settings
 import yaml
-# Import Path from pathlib for safe cross-platform file path handling
-from pathlib import Path
 # Import ChromaDB client to query persistent vector storage
 import chromadb
 # Import SentenceTransformer and CrossEncoder for dense search and reranking
@@ -73,9 +76,19 @@ class HybridRetriever:
             "n_results": top_k
         }
         
-        # Attach metadata filter dict if provided
+        # Attach and format metadata filter dict if provided
         if metadata_filter:
-            query_args["where"] = metadata_filter
+            # Check if metadata filter contains multiple conditions
+            if len(metadata_filter) > 1:
+                # Wrap multiple conditions inside ChromaDB's mandatory $and operator
+                formatted_filter = {
+                    "$and": [{k: v} for k, v in metadata_filter.items()]
+                }
+            else:
+                # Single condition dictionaries can be passed directly
+                formatted_filter = metadata_filter
+                
+            query_args["where"] = formatted_filter
             
         # Execute query against ChromaDB collection
         results = self.collection.query(**query_args)

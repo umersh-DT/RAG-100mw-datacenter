@@ -1,0 +1,52 @@
+[
+  {
+    "query_id": "QNA_001",
+    "category": "Commercial Legal",
+    "question": "What is the base electricity tariff and curtailment limit under the GridCo Power Purchase Agreement?",
+    "ground_truth": "The base electricity tariff is locked at $0.058 per kWh for the first five operating years. GridCo reserves the right to execute forced curtailment up to a maximum limit of 40 cumulative hours per calendar year if grid frequency drops below 49.8 Hz.",
+    "source_file": "PPA_GridCo_100MW_2025.pdf",
+    "expected_page": 1,
+    "metadata_filter": {
+      "document_type": "Power Purchase Agreement",
+      "tax_year": 2025,
+      "department": "Legal & Compliance"
+    }
+  },
+  {
+    "query_id": "QNA_002",
+    "category": "Financial Operations",
+    "question": "What was the total billing amount due for Q1 2025 electricity consumption, including energy tax?",
+    "ground_truth": "The total amount due for Q1 2025 is $3,361,575.00, which includes $3,201,500.00 in subtotal power supply charges and $160,075.00 in government energy tax (5%).",
+    "source_file": "INV_2025_Q1_GridCo_100MW.pdf",
+    "expected_page": 1,
+    "metadata_filter": {
+      "document_type": "TOU Power Invoice",
+      "tax_year": 2025,
+      "department": "Financial Operations"
+    }
+  },
+  {
+    "query_id": "QNA_003",
+    "category": "Electrical Engineering",
+    "question": "What are the capacity ratings and protection relays assigned to primary step-down transformer XFRM-01?",
+    "ground_truth": "XFRM-01 is rated at 50 MVA (132kV/33kV) with a fault current rating of 40 kA (1 sec) and is protected by a SEL-787 Differential relay.",
+    "source_file": "SLD_132kV_Substation_01.pdf",
+    "expected_page": 1,
+    "metadata_filter": {
+      "document_type": "Single Line Diagram",
+      "department": "Electrical Infrastructure"
+    }
+  },
+  {
+    "query_id": "QNA_004",
+    "category": "Electrical Engineering",
+    "question": "Which circuit breaker tag controls Transformer 1 on the 132kV main utility busbar?",
+    "ground_truth": "Circuit breaker tag CB-132-A1 (SF6 Gas Circuit Breaker, 2000A Continuous) controls Transformer 1 (XFRM-01).",
+    "source_file": "SLD_132kV_Substation_01.pdf",
+    "expected_page": 1,
+    "metadata_filter": {
+      "document_type": "Single Line Diagram",
+      "department": "Electrical Infrastructure"
+    }
+  }
+]

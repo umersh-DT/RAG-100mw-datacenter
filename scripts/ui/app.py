@@ -1,17 +1,18 @@
 import sys
 from pathlib import Path
+
+# Add project root directory to sys.path BEFORE any project imports
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
 import streamlit as st
 
-# Add project root directory to sys.path
-root_dir = Path(__file__).resolve().parents[2]
-if str(root_dir) not in sys.path:
-    sys.path.append(str(root_dir))
-
 # Resolve path references to check index existence
-CHROMA_DB_DIR = root_dir / "output" / "chroma_db"
-BM25_INDEX_FILE = root_dir / "output" / "bm25_index.pkl"
+CHROMA_DB_DIR = ROOT_DIR / "output" / "chroma_db"
+BM25_INDEX_FILE = ROOT_DIR / "output" / "bm25_index.pkl"
 
-# Import ingestion, indexing, and generator scripts
+# Import project modules now that ROOT_DIR is in sys.path
 from scripts.ingestion.parse_documents import parse_all_documents
 from scripts.ingestion.build_indices import build_vector_and_keyword_indices
 from scripts.generation.qa_generator import GroundedQAGenerator

@@ -1,15 +1,18 @@
 import sys
 from pathlib import Path
+
+# Set project root to index 0 of sys.path BEFORE any custom module imports
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import streamlit as st
 
-# Root directory is naturally resolved
-ROOT_DIR = Path(__file__).resolve().parent
-
-# Ensure indices exist paths
+# Resolve path references for database and keyword index
 CHROMA_DB_DIR = ROOT_DIR / "output" / "chroma_db"
 BM25_INDEX_FILE = ROOT_DIR / "output" / "bm25_index.pkl"
 
-# Clean imports from scripts package
+# Project imports (resolves cleanly via ROOT_DIR)
 from scripts.ingestion.parse_documents import parse_all_documents
 from scripts.ingestion.build_indices import build_vector_and_keyword_indices
 from scripts.generation.qa_generator import GroundedQAGenerator
@@ -23,7 +26,7 @@ st.set_page_config(
 st.title("⚡ 100MW Data Center Intelligence Engine")
 st.markdown("Query engineering drawings, financial regulations, and commercial legal contracts.")
 
-# Automatically build indices if missing on Cloud Container
+# Automatically build indices on Cloud Container if missing
 @st.cache_resource(show_spinner="Initializing Database & Building Indices...")
 def load_rag_engine():
     if not CHROMA_DB_DIR.exists() or not BM25_INDEX_FILE.exists():

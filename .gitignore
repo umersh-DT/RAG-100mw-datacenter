@@ -1,8 +1,15 @@
-# Data & Output Artifacts (Ignored to keep repo size light)
-/data/raw/*
-!/data/raw/.gitkeep
-/data/processed/*
+# Allow raw data directories and PDF files for cloud deployment
+!/data/
+!/data/raw/
+!/data/raw/**
+
+# Processed Data JSON cache (Ignored, generated dynamically)
+/data/processed/chunks.json
 !/data/processed/.gitkeep
+
+# Output Artifacts & Indices (Ignored, generated dynamically on startup)
+/output/chroma_db/
+/output/bm25_index.pkl
 /output/*
 !/output/.gitkeep
 

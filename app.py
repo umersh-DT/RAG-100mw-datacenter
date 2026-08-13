@@ -27,12 +27,13 @@ st.title("⚡ 100MW Data Center Intelligence Engine")
 st.markdown("Query engineering drawings, financial regulations, and commercial legal contracts.")
 
 # Automatically build indices on Cloud Container if missing
+# Automatically build indices on Cloud Container if missing
 @st.cache_resource(show_spinner="Initializing Database & Building Indices...")
 def load_rag_engine():
     if not CHROMA_DB_DIR.exists() or not BM25_INDEX_FILE.exists():
-        st.info("Indices not found. Parsing raw documents and generating ChromaDB + BM25 indices...")
-        parse_and_chunk_documents()  # Updated function name
-        build_vector_and_keyword_indices()
+        with st.spinner("Indices not found. Parsing raw documents and generating ChromaDB + BM25 indices..."):
+            parse_and_chunk_documents()
+            build_vector_and_keyword_indices()
     return GroundedQAGenerator()
 
 try:

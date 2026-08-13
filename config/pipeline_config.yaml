@@ -46,6 +46,8 @@ ingestion:
   processed_chunks_file: "data/processed/chunks.json"
   
 indexing:
+  chunk_size: 700
+  chunk_overlap: 150
   vector_db_dir: "output/chroma_db"
   bm25_index_file: "output/bm25_index.pkl"
   embedding_model: "all-MiniLM-L6-v2" # Lightweight, high-speed local embedding model
@@ -70,3 +72,9 @@ evaluation:
     faithfulness: 0.90
     answer_relevance: 0.85
     context_recall: 0.90    
+
+api:
+  host: "127.0.0.1"
+  port: 8000
+  title: "HyperScale 100MW Data Center RAG API"
+  version: "1.0.0"

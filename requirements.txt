@@ -14,3 +14,7 @@ langchain>=0.1.0
 langchain-community>=0.0.20
 langchain-google-vertexai
 langchain-openai
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.6.0
+streamlit>=1.31.0

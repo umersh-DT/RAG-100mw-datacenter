@@ -1,179 +1,137 @@
-# Import sys and Path to ensure root project imports function cleanly
+# Import sys and Path to ensure root project imports resolve cleanly
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-# Import os module for system path manipulation
-import os
-# Import json module to display retrieved results neatly
-import json
-# Import pickle module to deserialize the BM25 index artifact
 import pickle
-# Import yaml module to read central pipeline settings
 import yaml
-# Import ChromaDB client to query persistent vector storage
 import chromadb
-# Import SentenceTransformer and CrossEncoder for dense search and reranking
 from sentence_transformers import SentenceTransformer, CrossEncoder
 
 # Define local path variable pointing to central YAML configuration
 CONFIG_PATH = Path("config/pipeline_config.yaml")
 
-# Verify configuration file exists before executing logic
 if not CONFIG_PATH.exists():
-    # Raise descriptive FileNotFoundError if config path is broken
-    raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH.resolve()}")
+    raise FileNotFoundError(f"Configuration file missing at {CONFIG_PATH.resolve()}")
 
-# Open central configuration YAML file in read mode
 with open(CONFIG_PATH, "r") as f:
-    # Parse YAML contents into a structured Python dictionary
     config = yaml.safe_load(f)
 
-# Resolve path for ChromaDB storage directory
-VECTOR_DB_DIR = Path(config["indexing"]["vector_db_dir"])
-# Resolve path for serialized BM25 index file
-BM25_INDEX_FILE = Path(config["indexing"]["bm25_index_file"])
+# Resolve path references
+CHROMA_DB_DIR = Path(__file__).resolve().parents[2] / config["indexing"]["vector_db_dir"]
+BM25_INDEX_FILE = Path(__file__).resolve().parents[2] / config["indexing"]["bm25_index_file"]
+
+EMBEDDING_MODEL_NAME = config["indexing"].get("embedding_model", "all-MiniLM-L6-v2")
+RERANKER_MODEL_NAME = config["retrieval"].get("reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 
 class HybridRetriever:
-    """Combines Dense Vector Search (ChromaDB), Sparse Search (BM25), and Cross-Encoder Reranking."""
-    
+    """Executes dense vector search, sparse keyword search, RRF fusion, and Cross-Encoder reranking."""
+
     def __init__(self):
-        """Initializes ChromaDB connection, BM25 model, dense embedder, and cross-encoder reranker."""
-        # Print status log during retriever engine initialization
         print("[INFO] Initializing Hybrid Retriever engine...")
         
-        # Load local dense embedding model for query encoding
-        self.embedder = SentenceTransformer(config["indexing"]["embedding_model"])
-        
-        # Initialize persistent ChromaDB client
-        self.chroma_client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
-        # Retrieve target document collection from ChromaDB
+        # Load Dense Vector Database
+        self.chroma_client = chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
         self.collection = self.chroma_client.get_collection(name="datacenter_docs")
-        
-        # Open and deserialize BM25 index payload from pickle file
+        self.embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
+
+        # Load Sparse BM25 Index
+        if not BM25_INDEX_FILE.exists():
+            raise FileNotFoundError(f"BM25 index missing at {BM25_INDEX_FILE.resolve()}")
+
         with open(BM25_INDEX_FILE, "rb") as f:
-            bm25_data = pickle.load(f)
-            # Extract BM25 model object
-            self.bm25 = bm25_data["bm25_model"]
-            # Extract list of ordered chunk IDs
-            self.bm25_chunk_ids = bm25_data["chunk_ids"]
-            # Extract full lookup dictionary mapping IDs to chunk records
-            self.chunks_lookup = bm25_data["chunks_lookup"]
-            
-        # Initialize Cross-Encoder model for precision reranking
-        print(f"[INFO] Loading reranker model: {config['retrieval']['reranker_model']}...")
-        self.reranker = CrossEncoder(config["retrieval"]["reranker_model"])
+            bm25_payload = pickle.load(f)
 
-    def dense_search(self, query, top_k=5, metadata_filter=None):
-        """Executes semantic vector search in ChromaDB with optional metadata payload filtering."""
-        # Generate dense vector embedding for user query string
-        query_embedding = self.embedder.encode(query).tolist()
+        self.bm25 = bm25_payload["bm25_model"]
+        self.chunks = bm25_payload.get("chunks", [])
         
-        # Build ChromaDB query arguments
-        query_args = {
-            "query_embeddings": [query_embedding],
-            "n_results": top_k
-        }
-        
-        # Attach and format metadata filter dict if provided
-        if metadata_filter:
-            # Check if metadata filter contains multiple conditions
-            if len(metadata_filter) > 1:
-                # Wrap multiple conditions inside ChromaDB's mandatory $and operator
-                formatted_filter = {
-                    "$and": [{k: v} for k, v in metadata_filter.items()]
-                }
-            else:
-                # Single condition dictionaries can be passed directly
-                formatted_filter = metadata_filter
-                
-            query_args["where"] = formatted_filter
-            
-        # Execute query against ChromaDB collection
-        results = self.collection.query(**query_args)
-        
-        # Extract list of retrieved chunk IDs from response
-        retrieved_ids = results["ids"][0] if results["ids"] else []
-        # Return list of corresponding chunk record dictionaries
-        return [self.chunks_lookup[cid] for cid in retrieved_ids if cid in self.chunks_lookup]
+        # Build lookup dictionary mapping chunk_id to chunk object
+        self.chunk_map = {c["chunk_id"]: c for c in self.chunks}
 
-    def sparse_search(self, query, top_k=5):
-        """Executes BM25 keyword matching against tokenized corpus."""
-        # Tokenize user query string into lowercase words
+        # Load Reranker Model
+        print(f"[INFO] Loading Cross-Encoder reranker: {RERANKER_MODEL_NAME}...")
+        self.reranker = CrossEncoder(RERANKER_MODEL_NAME)
+
+    def dense_search(self, query: str, top_k: int = 10, metadata_filter: dict = None):
+        """Performs semantic search via ChromaDB vector embeddings."""
+        query_vector = self.embedder.encode(query).tolist()
+        
+        where_clause = None
+        if metadata_filter and metadata_filter.get("document_type") and metadata_filter["document_type"] != "All":
+            where_clause = {"document_type": metadata_filter["document_type"]}
+
+        results = self.collection.query(
+            query_embeddings=[query_vector],
+            n_results=top_k,
+            where=where_clause
+        )
+
+        dense_hits = []
+        if results["ids"] and results["ids"][0]:
+            for chunk_id, doc_text, meta in zip(results["ids"][0], results["documents"][0], results["metadatas"][0]):
+                dense_hits.append({
+                    "chunk_id": chunk_id,
+                    "text": doc_text,
+                    "metadata": meta
+                })
+        return dense_hits
+
+    def sparse_search(self, query: str, top_k: int = 10):
+        """Performs lexical search via BM25."""
         tokenized_query = query.lower().split()
-        # Calculate BM25 relevance scores for query across all indexed chunks
         scores = self.bm25.get_scores(tokenized_query)
         
-        # Pair each chunk ID with its corresponding BM25 score
-        scored_ids = list(zip(self.bm25_chunk_ids, scores))
-        # Sort scored chunks in descending order of BM25 relevance
-        scored_ids.sort(key=lambda x: x[1], reverse=True)
+        # Get top indices
+        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:top_k]
         
-        # Slice top-k highest scoring chunk IDs
-        top_ids = [cid for cid, score in scored_ids[:top_k] if score > 0]
-        # Return list of corresponding chunk record dictionaries
-        return [self.chunks_lookup[cid] for cid in top_ids if cid in self.chunks_lookup]
+        sparse_hits = []
+        for idx in top_indices:
+            if scores[idx] > 0:
+                sparse_hits.append(self.chunks[idx])
+        return sparse_hits
 
-    def hybrid_search(self, query, metadata_filter=None):
-        """Executes hybrid retrieval, deduplicates candidates, and reranks using Cross-Encoder."""
-        # Execute dense vector search using configured top_k_vector depth
-        dense_results = self.dense_search(
-            query, 
-            top_k=config["retrieval"]["top_k_vector"], 
-            metadata_filter=metadata_filter
-        )
-        
-        # Execute sparse BM25 search using configured top_k_bm25 depth
-        sparse_results = self.sparse_search(
-            query, 
-            top_k=config["retrieval"]["top_k_bm25"]
-        )
-        
-        # Combine dense and sparse candidate chunks into a single list
-        combined_candidates = dense_results + sparse_results
-        
-        # Deduplicate candidates using unique chunk_id as key
-        deduped_lookup = {item["chunk_id"]: item for item in combined_candidates}
-        unique_candidates = list(deduped_lookup.values())
-        
-        # If no candidates found, return empty list early
-        if not unique_candidates:
+    def reciprocal_rank_fusion(self, dense_hits: list, sparse_hits: list, k: int = 60):
+        """Merges vector and keyword hits using Reciprocal Rank Fusion (RRF)."""
+        rrf_scores = {}
+
+        for rank, hit in enumerate(dense_hits, start=1):
+            cid = hit["chunk_id"]
+            rrf_scores[cid] = rrf_scores.get(cid, 0) + (1.0 / (k + rank))
+
+        for rank, hit in enumerate(sparse_hits, start=1):
+            cid = hit["chunk_id"]
+            rrf_scores[cid] = rrf_scores.get(cid, 0) + (1.0 / (k + rank))
+
+        # Sort chunk IDs by fused score
+        sorted_cids = sorted(rrf_scores.keys(), key=lambda cid: rrf_scores[cid], reverse=True)
+        return [self.chunk_map[cid] for cid in sorted_cids if cid in self.chunk_map]
+
+    def hybrid_search(self, query: str, top_k: int = 3, metadata_filter: dict = None):
+        """Executes full hybrid search pipeline: Dense + Sparse -> RRF -> Cross-Encoder Rerank."""
+        dense_hits = self.dense_search(query, top_k=10, metadata_filter=metadata_filter)
+        sparse_hits = self.sparse_search(query, top_k=10)
+
+        fused_candidates = self.reciprocal_rank_fusion(dense_hits, sparse_hits)
+
+        if not fused_candidates:
             return []
-            
-        # Construct sentence pairs list for Cross-Encoder scoring: [ (query, chunk_text), ... ]
-        pair_inputs = [(query, item["text"]) for item in unique_candidates]
-        
-        # Compute joint relevance scores using Cross-Encoder model
-        rerank_scores = self.reranker.predict(pair_inputs)
-        
-        # Attach computed rerank scores to candidate dictionaries
-        for idx, item in enumerate(unique_candidates):
-            item["rerank_score"] = float(rerank_scores[idx])
-            
-        # Sort candidates in descending order based on Cross-Encoder score
-        unique_candidates.sort(key=lambda x: x["rerank_score"], reverse=True)
-        
-        # Slice final top_k_final chunks for LLM context window
-        final_top_k = config["retrieval"]["top_k_final"]
-        return unique_candidates[:final_top_k]
+
+        # Rerank candidates using Cross-Encoder
+        pairs = [[query, candidate["text"]] for candidate in fused_candidates]
+        scores = self.reranker.predict(pairs)
+
+        for candidate, score in zip(fused_candidates, scores):
+            candidate["rerank_score"] = float(score)
+
+        # Sort candidates by reranker score
+        reranked_hits = sorted(fused_candidates, key=lambda x: x["rerank_score"], reverse=True)
+        return reranked_hits[:top_k]
 
 
-# Check if script is run directly from CLI for verification
 if __name__ == "__main__":
-    # Instantiate hybrid retriever engine
     retriever = HybridRetriever()
-    
-    # Test sample query
-    test_query = "What is the capacity rating and relay for XFRM-01?"
-    print(f"\n[TEST QUERY] '{test_query}'")
-    
-    # Run hybrid retrieval pipeline
-    top_chunks = retriever.hybrid_search(test_query)
-    
-    # Print retrieved and reranked candidate chunks
-    print(f"\n[RETRIEVED {len(top_chunks)} RERANKED CHUNKS]:")
-    for rank, chunk in enumerate(top_chunks, start=1):
-        print(f"\n--- Rank {rank} | Rerank Score: {chunk['rerank_score']:.4f} ---")
-        print(f"Source File: {chunk['metadata']['source_file']} (Page {chunk['metadata']['page_number']})")
-        print(f"Text Snippet: {chunk['text'][:180]}...")
+    hits = retriever.hybrid_search("how many 50MVA transformer we are using")
+    print(f"\n[SUCCESS] Retrieved {len(hits)} reranked chunks:")
+    for h in hits:
+        print(f" - {h['chunk_id']} (Score: {h['rerank_score']:.4f})")

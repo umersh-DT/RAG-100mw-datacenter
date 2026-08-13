@@ -1,113 +1,88 @@
-# Import sys and Path to append the project root directory to Python's module search path
+# Import sys and Path to ensure root project imports resolve cleanly
 import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-# Import os module for system path operations
 import os
-# Import json module to log response payloads
-import json
-# Import yaml module to parse central pipeline settings
 import yaml
-# Import Path from pathlib for safe cross-platform file paths
-from pathlib import Path
-# Import HybridRetriever from our retrieval engine module
+from google import genai
+
+# Import Hybrid Retriever engine
 from scripts.retrieval.hybrid_retriever import HybridRetriever
 
 # Define local path variable pointing to central YAML configuration
 CONFIG_PATH = Path("config/pipeline_config.yaml")
 
-# Verify configuration file exists before executing logic
 if not CONFIG_PATH.exists():
-    # Raise descriptive FileNotFoundError if config path is broken
     raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH.resolve()}")
 
-# Open central configuration YAML file in read mode
 with open(CONFIG_PATH, "r") as f:
-    # Parse YAML contents into a structured Python dictionary
     config = yaml.safe_load(f)
 
 
 class GroundedQAGenerator:
-    """Orchestrates Hybrid Retrieval and Grounded Answer Synthesis with Strict Citations."""
-    
+    """Retrieves context chunks and synthesizes direct grounded answers using Google Gemini."""
+
     def __init__(self):
-        """Initializes the hybrid retriever engine and loads system prompt configurations."""
-        # Print status log during QA generator initialization
-        print("[INFO] Initializing Grounded QA Generator engine...")
-        # Instantiate hybrid retriever engine instance
+        """Initializes the hybrid retriever and Google GenAI client with explicit API key routing."""
+        print("[INFO] Initializing Grounded QA Generator engine (Gemini)...")
         self.retriever = HybridRetriever()
-        # Load system prompt template from configuration dictionary
-        self.system_prompt = config["generation"]["system_prompt"]
-
-    def build_context_block(self, retrieved_chunks):
-        """Formats top reranked chunks into a clean, annotated context string for the LLM."""
-        # Initialize empty list to accumulate formatted chunk strings
-        context_parts = []
         
-        # Iterate over retrieved candidate chunks
+        # Explicitly pull GEMINI_API_KEY from environment to prevent GOOGLE_API_KEY override
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "Gemini API key not found. Please set $env:GEMINI_API_KEY in your terminal."
+            )
+            
+        # Initialize Google GenAI client with explicit API key
+        self.client = genai.Client(api_key=api_key)
+        # Using active Gemini Flash model endpoint
+        self.model_name = "gemini-2.5-flash"
+
+    def generate_answer(self, query: str, metadata_filter: dict = None):
+        """Retrieves context chunks and generates a direct response using Gemini."""
+        # Step 1: Execute hybrid search + reranking
+        retrieved_chunks = self.retriever.hybrid_search(query, metadata_filter=metadata_filter)
+        
+        if not retrieved_chunks:
+            return "No relevant information found in the indexed documents to answer this query.", []
+
+        # Step 2: Format context text
+        context_blocks = []
         for idx, chunk in enumerate(retrieved_chunks, start=1):
-            # Extract metadata attributes for citation context
-            source_file = chunk["metadata"]["source_file"]
-            page_num = chunk["metadata"]["page_number"]
-            text_content = chunk["text"]
+            source = chunk["metadata"]["source_file"]
+            page = chunk["metadata"]["page_number"]
+            context_blocks.append(f"--- CONTEXT CHUNK {idx} (Source: {source}, Page {page}) ---\n{chunk['text'].strip()}")
             
-            # Format chunk header and body text
-            part = f"--- CONTEXT CHUNK {idx} [Source: {source_file} | Page: {page_num}] ---\n{text_content}\n"
-            # Append formatted chunk string to context parts list
-            context_parts.append(part)
-            
-        # Join all chunk strings into a single consolidated context block
-        return "\n".join(context_parts)
+        context_str = "\n\n".join(context_blocks)
 
-    def generate_answer(self, query, metadata_filter=None):
-        """Executes full RAG workflow: Retrieves top chunks, builds context, and simulates grounded LLM response."""
-        # Execute hybrid retrieval and cross-encoder reranking
-        top_chunks = self.retriever.hybrid_search(query, metadata_filter=metadata_filter)
-        
-        # Check if any candidate chunks were retrieved
-        if not top_chunks:
-            # Return fallback string if no context exists
-            return "I am unable to answer the query because no relevant source documents were retrieved.", []
-            
-        # Format context block from retrieved candidate chunks
-        context_block = self.build_context_block(top_chunks)
-        
-        # Construct complete prompt string combining system instructions, context, and query
-        full_prompt = (
-            f"{self.system_prompt}\n\n"
-            f"=== RETRIEVED CONTEXT ===\n"
-            f"{context_block}\n"
-            f"=== USER QUESTION ===\n"
-            f"{query}"
+        # Step 3: Construct Prompt
+        prompt = (
+            "You are an expert infrastructure analyst for a 100MW data center.\n"
+            "Answer the user's question directly, accurately, and concisely (1 to 3 sentences max) "
+            "using ONLY the provided context documents.\n\n"
+            f"Context Documents:\n{context_str}\n\n"
+            f"User Question: {query}\n\n"
+            "Direct Answer:"
         )
-        
-        # Display constructed context block in terminal for developer verification
-        print("\n=== FORMATTED CONTEXT PASSED TO GENERATOR ===")
-        print(context_block)
-        
-        # Synthesize factual response from context blocks
-        synthesized_response = (
-            "Transformer XFRM-01 is rated at 50 MVA (132kV/33kV step-down) with a 40 kA (1 sec) fault current rating "
-            "and is protected by a SEL-787 Differential relay [SLD_132kV_Substation_01.pdf, Page 1]."
-        )
-        
-        # Return synthesized grounded answer string alongside source context chunks
-        return synthesized_response, top_chunks
+
+        # Step 4: Generate Direct Answer
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
+            grounded_answer = response.text.strip()
+        except Exception as e:
+            grounded_answer = f"[Gemini API Error: {str(e)}]"
+
+        return grounded_answer, retrieved_chunks
 
 
-# Check if script is executed directly from CLI for verification
 if __name__ == "__main__":
-    # Instantiate grounded QA generator
     generator = GroundedQAGenerator()
-    
-    # Test query
-    test_query = "What is the capacity rating and relay for XFRM-01?"
-    print(f"\n[USER QUESTION] '{test_query}'")
-    
-    # Run end-to-end RAG pipeline
+    test_query = "how many 50MVA transformer we are using"
     answer, sources = generator.generate_answer(test_query)
-    
-    # Print synthesized answer output
-    print("\n=== GENERATED GROUNDED ANSWER ===")
+    print("\n--- SYNTHESIZED GEMINI ANSWER ---")
     print(answer)

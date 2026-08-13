@@ -1,156 +1,125 @@
-# Import os module for file and directory navigation
-import os
-# Import json module to serialize processed chunk outputs
-import json
-# Import yaml module to read central pipeline settings
-import yaml
-# Import Path from pathlib for safe cross-platform file path handling
+# Import sys and Path to ensure root project imports resolve cleanly
+import sys
 from pathlib import Path
-# Import pypdf to extract raw text and page counts from generated PDFs
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+# Import standard library modules
+import json
+import yaml
 from pypdf import PdfReader
 
 # Define local path variable pointing to central YAML configuration
 CONFIG_PATH = Path("config/pipeline_config.yaml")
 
-# Verify configuration file exists before proceeding
+# Verify configuration file exists
 if not CONFIG_PATH.exists():
-    # Raise descriptive FileNotFoundError if config path is broken
     raise FileNotFoundError(f"Configuration file not found at {CONFIG_PATH.resolve()}")
 
-# Open central configuration YAML file in read mode
+# Load central pipeline configuration
 with open(CONFIG_PATH, "r") as f:
-    # Parse YAML contents into a Python dictionary
     config = yaml.safe_load(f)
 
-# Resolve path for raw data directory containing all generated subfolders
-RAW_DATA_DIR = Path(config["paths"]["raw_data_dir"])
-# Resolve target output path for processed chunks JSON file
-PROCESSED_CHUNKS_FILE = Path(config["ingestion"]["processed_chunks_file"])
-# Ensure the parent directory for processed chunks exists
-PROCESSED_CHUNKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+# Resolve paths
+RAW_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
+PROCESSED_DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "processed" / "chunks.json"
+PROCESSED_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+# Pull chunking configuration values from pipeline_config.yaml
+CHUNK_SIZE = config["indexing"].get("chunk_size", 700)
+CHUNK_OVERLAP = config["indexing"].get("chunk_overlap", 150)
 
 
-def extract_metadata_from_filename(filename):
-    """Infers document type, department, and tax year metadata based on file naming conventions."""
-    # Convert filename string to lowercase for standardized matching
-    fname = filename.lower()
-    
-    # Initialize default metadata payload
-    meta = {
-        "document_type": "Unknown",
-        "department": "General",
-        "tax_year": 2025
-    }
-    
-    # Check if file is a Power Purchase Agreement
-    if "ppa" in fname:
-        meta["document_type"] = "Power Purchase Agreement"
-        meta["department"] = "Legal & Compliance"
-    # Check if file is an invoice or billing document
-    elif "inv" in fname or "invoice" in fname:
-        meta["document_type"] = "TOU Power Invoice"
-        meta["department"] = "Financial Operations"
-    # Check if file is a Single Line Diagram CAD drawing
-    elif "sld" in fname:
-        meta["document_type"] = "Single Line Diagram"
-        meta["department"] = "Electrical Infrastructure"
-        
-    # Return extracted metadata dictionary
-    return meta
-
-
-def chunk_text(text, chunk_size=500, overlap=50):
-    """Splits a long string into overlapping character chunks to preserve local semantic context."""
-    # Initialize empty list to hold chunk strings
+def split_text_into_chunks(text: str, chunk_size: int, chunk_overlap: int) -> list:
+    """Splits a body of text into overlapping character windows."""
     chunks = []
-    # Set starting character index pointer to 0
     start = 0
-    # Store total character length of input text string
-    text_len = len(text)
+    text_length = len(text)
     
-    # Loop until starting index exceeds overall text length
-    while start < text_len:
-        # Calculate ending character index for current chunk
+    while start < text_length:
         end = start + chunk_size
-        # Slice substring from start to end index
         chunk = text[start:end]
-        # Append sliced chunk to output list
         chunks.append(chunk)
-        # Advance starting pointer by chunk_size minus overlap
-        start += (chunk_size - overlap)
+        # Advance the sliding window by chunk_size minus overlap
+        start += (chunk_size - chunk_overlap)
         
-    # Return list of string chunks
     return chunks
 
 
-def parse_all_documents():
-    """Iterates through data/raw/, parses PDFs page-by-page, attaches metadata, and writes chunks.json."""
-    # Initialize empty list to hold structured chunk dictionaries
+def infer_document_type(source_file: str) -> str:
+    """Dynamically categorizes document types based on file naming patterns."""
+    source_upper = source_file.upper()
+    if "SLD" in source_upper or "ENGINEERING" in source_upper:
+        return "Single Line Diagram"
+    elif "INV" in source_upper or "INVOICE" in source_upper:
+        return "TOU Power Invoice"
+    elif "PPA" in source_upper or "CONTRACT" in source_upper:
+        return "Power Purchase Agreement"
+    return "General Infrastructure Record"
+
+
+def parse_and_chunk_documents():
+    """Parses raw PDF files recursively, extracts text/metadata, and generates chunk records."""
     all_chunks = []
-    # Counter for assigning globally unique chunk IDs
-    chunk_counter = 0
     
-    # Recursively find all PDF files inside the raw data directory
+    # Recursively locate all PDF files across subfolders in data/raw/
     pdf_files = list(RAW_DATA_DIR.rglob("*.pdf"))
-    
-    # Loop over every discovered PDF file
-    for pdf_path in pdf_files:
-        # Extract filename string from Path object
-        filename = pdf_path.name
-        # Extract metadata attributes based on file naming patterns
-        doc_metadata = extract_metadata_from_filename(filename)
-        
-        # Open PDF using PyPDF reader
-        reader = PdfReader(str(pdf_path))
-        
-        # Iterate over pages using 1-based indexing for standard citations
-        for page_num, page in enumerate(reader.pages, start=1):
-            # Extract raw text content from page object
-            page_text = page.extract_text()
-            
-            # Skip page if text extraction returns empty string
-            if not page_text or not page_text.strip():
-                continue
-                
-            # Split page text into overlapping chunks using config chunk size
-            raw_chunks = chunk_text(
-                page_text, 
-                chunk_size=config["chunking"]["chunk_size"],
-                overlap=config["chunking"]["chunk_overlap"]
-            )
-            
-            # Loop over generated string chunks for current page
-            for chunk_idx, chunk_content in enumerate(raw_chunks):
-                # Increment global chunk counter
-                chunk_counter += 1
-                
-                # Construct structured chunk payload object
-                chunk_record = {
-                    "chunk_id": f"CHUNK_{chunk_counter:04d}",
-                    "text": chunk_content.strip(),
-                    "metadata": {
-                        "source_file": filename,
-                        "page_number": page_num,
-                        "chunk_index": chunk_idx,
-                        "document_type": doc_metadata["document_type"],
-                        "department": doc_metadata["department"],
-                        "tax_year": doc_metadata["tax_year"]
+    if not pdf_files:
+        print(f"[WARNING] No PDF files found in {RAW_DATA_DIR.resolve()}")
+        return
+
+    print(f"[INFO] Processing {len(pdf_files)} PDFs across subdirectories...")
+    print(f"[INFO] Chunking Settings: Size={CHUNK_SIZE} chars, Overlap={CHUNK_OVERLAP} chars.")
+
+    processed_pages = 0
+
+    for idx, pdf_path in enumerate(pdf_files, start=1):
+        try:
+            reader = PdfReader(pdf_path)
+            source_file = pdf_path.name
+            doc_type = infer_document_type(source_file)
+
+            for page_idx, page in enumerate(reader.pages, start=1):
+                processed_pages += 1
+                text = page.extract_text()
+                if not text or not text.strip():
+                    continue
+
+                # Split page text into sliding character chunks
+                page_chunks = split_text_into_chunks(text, CHUNK_SIZE, CHUNK_OVERLAP)
+
+                for chunk_idx, chunk_text in enumerate(page_chunks):
+                    chunk_id = f"{pdf_path.stem}_p{page_idx}_c{chunk_idx}"
+                    
+                    metadata = {
+                        "source_file": source_file,
+                        "page_number": page_idx,
+                        "document_type": doc_type,
+                        "folder_category": pdf_path.parent.name
                     }
-                }
-                
-                # Append structured chunk record to output list
-                all_chunks.append(chunk_record)
-                
-    # Open target processed output file in write mode with UTF-8 encoding
-    with open(PROCESSED_CHUNKS_FILE, "w", encoding="utf-8") as f:
-        # Dump list of structured chunk records into formatted JSON
+
+                    all_chunks.append({
+                        "chunk_id": chunk_id,
+                        "text": chunk_text,
+                        "metadata": metadata
+                    })
+
+            # Print batch ingestion status every 10 files
+            if idx % 10 == 0 or idx == len(pdf_files):
+                print(f"  --> Progress: Processed {idx}/{len(pdf_files)} files ({len(all_chunks)} chunks generated)")
+
+        except Exception as e:
+            print(f"[ERROR] Failed to process {pdf_path.name}: {str(e)}")
+
+    # Write output to processed chunks file
+    with open(PROCESSED_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(all_chunks, f, indent=2)
-        
-    # Print execution success log to terminal
-    print(f"[SUCCESS] Parsed {len(pdf_files)} PDFs into {len(all_chunks)} chunks at: {PROCESSED_CHUNKS_FILE.resolve()}")
+
+    print(f"\n[SUCCESS] Ingestion Complete!")
+    print(f"  * Total PDFs Processed: {len(pdf_files)}")
+    print(f"  * Total Pages Extracted: {processed_pages}")
+    print(f"  * Total Chunks Generated: {len(all_chunks)}")
+    print(f"  * Payload Saved To: {PROCESSED_DATA_FILE.resolve()}")
 
 
-# Check if script is run directly from CLI
 if __name__ == "__main__":
-    # Execute document parsing pipeline
-    parse_all_documents()
+    parse_and_chunk_documents()

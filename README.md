@@ -50,6 +50,32 @@ Our pipeline combines **two complementary search layers** backed by a **reranker
 * **Grounded Direct Synthesis:** The reranked context chunks are passed into the Google Gemini API with explicit grounding instructions: synthesize direct answers strictly based on the provided technical context, citing source files and page numbers.
 * **Zero-Hallucination Guardrails:** If retrieved context lacks the necessary specifications to answer a query, the model is prompted to state that the context is insufficient rather than generating plausible engineering assumptions.
 
+  ## 📈 Enterprise Scalability & System Extension
+
+While this repository demonstrates a lightweight, self-contained deployment for a 100MW data center infrastructure dataset, the modular architecture is designed to scale horizontally across large enterprises, multi-tenant organizations, and multi-facility industrial operations.
+
+### How This Engine Scales for Large-Scale Enterprise Deployments
+
+1. **Distributed Vector Database (ChromaDB Cloud / Qdrant / Milvus)**
+   * **Current Setup:** Local embedded ChromaDB instance reading from persistent disk storage.
+   * **Enterprise Scaling:** Swap the local vector store for a managed, distributed vector database cluster (e.g., **ChromaDB Cloud**, **Qdrant**, or **Milvus**). This enables multi-region indexing, sub-second search over millions of document chunks, and high availability across thousands of concurrent users.
+
+2. **Asynchronous Document Processing Pipelines (Celery + Redis / Apache Kafka)**
+   * **Current Setup:** In-memory PDF parsing and chunking on startup via `pypdf`.
+   * **Enterprise Scaling:** Offload document ingestion to an asynchronous job queue using **Redis + Celery** or **Apache Kafka**. Incoming engineering drawings, invoices, and contracts uploaded via cloud storage (AWS S3 / Google Cloud Storage) are processed in parallel background worker pools without blocking application performance.
+
+3. **Multi-Tenancy & Access Control (RBAC / Row-Level Security)**
+   * **Current Setup:** Unified single-tenant access.
+   * **Enterprise Scaling:** Implement Role-Based Access Control (RBAC) at the retrieval layer using metadata tags. Different departments (Engineering, Legal, Finance, Site Operations) query the same engine while automatically filtering results to only include documents they are authorized to view.
+
+4. **REST API & Microservice Integration (FastAPI / Docker / Kubernetes)**
+   * **Current Setup:** Direct native Python calls driving a Streamlit UI.
+   * **Enterprise Scaling:** Expose the RAG engine via a high-performance **FastAPI microservice** containerized with **Docker** and orchestrated on **Kubernetes (EKS/GKE)**. This allows existing enterprise tools—such as internal Slack/Teams bots, ERP systems, or custom web portals—to leverage the intelligence engine via simple REST API endpoints.
+
+5. **Advanced Multimodal PDF Parsing (Unstructured.io / Azure Layout Parser)**
+   * **Current Setup:** Native text extraction with sliding character windows.
+   * **Enterprise Scaling:** Integrate vision-language parsers or dedicated document AI tooling (**Unstructured.io**, **Azure AI Document Intelligence**) to extract complex multi-page tables, embedded CAD drawing legends, and inline circuit schematics into structured JSON nodes prior to vector embedding.
+
 ---
 
 ## 🏗️ End-to-End System Flow
@@ -89,28 +115,4 @@ Our pipeline combines **two complementary search layers** backed by a **reranker
                │    Streamlit Cloud User Interface    │
                └──────────────────────────────────────┘
 
-## 📈 Enterprise Scalability & System Extension
 
-While this repository demonstrates a lightweight, self-contained deployment for a sample 100MW data center infrastructure dataset, the modular architecture is designed to scale horizontally across large enterprises, multi-tenant organizations, and multi-facility industrial operations.
-
-### How This Engine Scales for Large-Scale Enterprise Deployments
-
-1. **Distributed Vector Database (ChromaDB Cloud / Qdrant / Milvus)**
-   * **Current Setup:** Local embedded ChromaDB instance reading from persistent disk storage.
-   * **Enterprise Scaling:** Swap the local vector store for a managed, distributed vector database cluster (e.g., **ChromaDB Cloud**, **Qdrant**, or **Milvus**). This enables multi-region indexing, sub-second search over millions of document chunks, and high availability across thousands of concurrent users.
-
-2. **Asynchronous Document Processing Pipelines (Celery + Redis / Apache Kafka)**
-   * **Current Setup:** In-memory PDF parsing and chunking on startup via `pypdf`.
-   * **Enterprise Scaling:** Offload document ingestion to an asynchronous job queue using **Redis + Celery** or **Apache Kafka**. Incoming engineering drawings, invoices, and contracts uploaded via cloud storage (AWS S3 / Google Cloud Storage) are processed in parallel background worker pools without blocking application performance.
-
-3. **Multi-Tenancy & Access Control (RBAC / Row-Level Security)**
-   * **Current Setup:** Unified single-tenant access.
-   * **Enterprise Scaling:** Implement Role-Based Access Control (RBAC) at the retrieval layer using metadata tags. Different departments (Engineering, Legal, Finance, Site Operations) query the same engine while automatically filtering results to only include documents they are authorized to view.
-
-4. **REST API & Microservice Integration (FastAPI / Docker / Kubernetes)**
-   * **Current Setup:** Direct native Python calls driving a Streamlit UI.
-   * **Enterprise Scaling:** Expose the RAG engine via a high-performance **FastAPI microservice** containerized with **Docker** and orchestrated on **Kubernetes (EKS/GKE)**. This allows existing enterprise tools—such as internal Slack/Teams bots, ERP systems, or custom web portals—to leverage the intelligence engine via simple REST API endpoints.
-
-5. **Advanced Multimodal PDF Parsing (Unstructured.io / Azure Layout Parser)**
-   * **Current Setup:** Native text extraction with sliding character windows.
-   * **Enterprise Scaling:** Integrate vision-language parsers or dedicated document AI tooling (**Unstructured.io**, **Azure AI Document Intelligence**) to extract complex multi-page tables, embedded CAD drawing legends, and inline circuit schematics into structured JSON nodes prior to vector embedding.

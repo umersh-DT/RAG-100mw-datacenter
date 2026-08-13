@@ -1,15 +1,18 @@
-# Import sys and Path to ensure root project imports resolve cleanly
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-# Import standard library modules
 import json
 import yaml
 from pypdf import PdfReader
 
-# Define local path variable pointing to central YAML configuration
-CONFIG_PATH = Path("config/pipeline_config.yaml")
+# Resolve project root dynamically (RAG-100mw-datacenter)
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+# Define paths relative to ROOT_DIR
+CONFIG_PATH = ROOT_DIR / "config" / "pipeline_config.yaml"
+RAW_DATA_DIR = ROOT_DIR / "data" / "raw"
+PROCESSED_DATA_FILE = ROOT_DIR / "data" / "processed" / "chunks.json"
 
 # Verify configuration file exists
 if not CONFIG_PATH.exists():
@@ -19,9 +22,6 @@ if not CONFIG_PATH.exists():
 with open(CONFIG_PATH, "r") as f:
     config = yaml.safe_load(f)
 
-# Resolve paths
-RAW_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
-PROCESSED_DATA_FILE = Path(__file__).resolve().parents[2] / "data" / "processed" / "chunks.json"
 PROCESSED_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # Pull chunking configuration values from pipeline_config.yaml

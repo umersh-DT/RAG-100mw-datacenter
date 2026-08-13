@@ -13,7 +13,7 @@ CHROMA_DB_DIR = ROOT_DIR / "output" / "chroma_db"
 BM25_INDEX_FILE = ROOT_DIR / "output" / "bm25_index.pkl"
 
 # Project imports (resolves cleanly via ROOT_DIR)
-from scripts.ingestion.parse_documents import parse_all_documents
+from scripts.ingestion.parse_documents import parse_and_chunk_documents
 from scripts.ingestion.build_indices import build_vector_and_keyword_indices
 from scripts.generation.qa_generator import GroundedQAGenerator
 
@@ -31,7 +31,7 @@ st.markdown("Query engineering drawings, financial regulations, and commercial l
 def load_rag_engine():
     if not CHROMA_DB_DIR.exists() or not BM25_INDEX_FILE.exists():
         st.info("Indices not found. Parsing raw documents and generating ChromaDB + BM25 indices...")
-        parse_all_documents()
+        parse_and_chunk_documents()  # Updated function name
         build_vector_and_keyword_indices()
     return GroundedQAGenerator()
 
